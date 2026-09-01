@@ -1,0 +1,21 @@
+# Hasil build .NET
+bin/
+obj/
+
+# Berkas uji lokal
+*.pgn
+artikel.md
+prompt.txt
+*.csv
+
+# Rahasia — dibaca dari variabel lingkungan, jangan pernah ditulis ke berkas
+.env
+.env.*
+*.secrets.json
+
+# Editor & OS
+.vs/
+.idea/
+*.user
+.DS_Store
+Thumbs.db
