@@ -114,8 +114,6 @@ dipindah sepenuhnya ke variabel lingkungan.
 
 ## Belum dikerjakan
 
-- Tiga pemanggilan HTTP masih memakai `WebRequest`, yang di .NET modern sudah usang.
-  Perlu dipindahkan ke `HttpClient` — masih berfungsi, tapi memunculkan peringatan saat build
 - Analisis mesin memanggil skrip Python di luar; idealnya berbicara langsung ke Stockfish lewat UCI
 - Belum ada test otomatis
 

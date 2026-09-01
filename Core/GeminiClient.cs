@@ -62,48 +62,34 @@ namespace ChessArticle
             string url = "https://generativelanguage.googleapis.com/v1beta/models/"
                 + model + ":generateContent?key=" + Uri.EscapeDataString(apiKey);
 
-            byte[] payload = Encoding.UTF8.GetBytes(json);
+            string payload = json;
             const int maxAttempts = 5;
 
             for (int attempt = 1; attempt <= maxAttempts; attempt++)
             {
                 try
                 {
-                    var req = (HttpWebRequest)WebRequest.Create(url);
-                    req.Method = "POST";
-                    req.ContentType = "application/json";
-                    req.Timeout = 300000; // 5 minutes
-                    req.ContentLength = payload.Length;
-                    using (Stream s = req.GetRequestStream())
-                    {
-                        s.Write(payload, 0, payload.Length);
-                    }
+                    HttpOutcome http = Http.PostJson(url, payload, timeoutMs: 300000);
 
-                    using (var resp = (HttpWebResponse)req.GetResponse())
-                    using (var reader = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
+                    if (http.IsSuccess)
                     {
-                        result.Text = ExtractText(ser, reader.ReadToEnd(), result);
+                        result.Text = ExtractText(ser, http.Body, result);
                         result.Ok = result.Error.Length == 0 && result.Text.Length > 0;
+                        sw.Stop();
+                        result.DurationMs = sw.ElapsedMilliseconds;
+                        break; // success - leave the retry loop
                     }
-                    sw.Stop();
-                    result.DurationMs = sw.ElapsedMilliseconds;
-                    break; // success - leave the retry loop
-                }
-                catch (WebException wex)
-                {
-                    int status = 0;
-                    var httpResp = wex.Response as HttpWebResponse;
-                    if (httpResp != null) status = (int)httpResp.StatusCode;
 
                     // Gemini is frequently briefly overloaded - back off and retry.
-                    bool retryable = status == 429 || status == 500
-                        || status == 502 || status == 503 || status == 529;
+                    bool retryable = http.Status == 429 || http.Status == 500
+                                  || http.Status == 502 || http.Status == 503
+                                  || http.Status == 529;
                     if (retryable && attempt < maxAttempts)
                     {
                         System.Threading.Thread.Sleep(8000 * attempt);
                         continue;
                     }
-                    result.Error = ReadWebError(wex);
+                    result.Error = DescribeError(http);
                     break;
                 }
                 catch (Exception ex)
@@ -209,26 +195,13 @@ namespace ChessArticle
             return "";
         }
 
-        private static string ReadWebError(WebException wex)
+        private static string DescribeError(HttpOutcome http)
         {
-            string body = "";
-            try
-            {
-                if (wex.Response != null)
-                {
-                    using (var reader = new StreamReader(wex.Response.GetResponseStream()))
-                    {
-                        body = reader.ReadToEnd();
-                    }
-                }
-            }
-            catch
-            {
-                // ignore - fall back to the exception message
-            }
-            return body.Length > 0
-                ? "Gemini API error: " + body
-                : "Gemini API request failed: " + wex.Message;
+            if (!http.Sent)
+                return "Gemini API unreachable: " + http.TransportError;
+            return http.Body.Length > 0
+                ? "Gemini API error (HTTP " + http.Status + "): " + http.Body
+                : "Gemini API returned HTTP " + http.Status + " with no body";
         }
 
         private static int AsInt(Dictionary<string, object> d, string k)

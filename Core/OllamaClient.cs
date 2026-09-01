@@ -62,7 +62,7 @@ namespace ChessArticle
                     }
                 },
             };
-            byte[] payload = Encoding.UTF8.GetBytes(ser.Serialize(requestBody));
+            string payload = ser.Serialize(requestBody);
 
             // Single retry on transient 5xx (Ollama returns 500 briefly when it
             // swaps a model out of VRAM under memory pressure). One retry with
@@ -72,45 +72,25 @@ namespace ChessArticle
             {
                 try
                 {
-                    var req = (HttpWebRequest)WebRequest.Create(baseUrl + "/api/chat");
-                    req.Method = "POST";
-                    req.ContentType = "application/json";
-                    req.Timeout = 600000; // 10 minutes - local models can be slow
-                    req.ContentLength = payload.Length;
-                    using (Stream s = req.GetRequestStream())
+                    HttpOutcome http = Http.PostJson(
+                        baseUrl + "/api/chat", payload,
+                        timeoutMs: 600000);   // 10 minutes - local models can be slow
+
+                    if (http.IsSuccess)
                     {
-                        s.Write(payload, 0, payload.Length);
+                        ParseSuccess(ser, http.Body, result);
+                        return result;
                     }
 
-                    using (var resp = (HttpWebResponse)req.GetResponse())
-                    using (var reader = new StreamReader(resp.GetResponseStream(), Encoding.UTF8))
-                    {
-                        ParseSuccess(ser, reader.ReadToEnd(), result);
-                    }
-                    return result;
-                }
-                catch (WebException wex)
-                {
-                    int status = 0;
-                    string body = "";
-                    var httpResp = wex.Response as HttpWebResponse;
-                    if (httpResp != null)
-                    {
-                        status = (int)httpResp.StatusCode;
-                        try
-                        {
-                            using (var r = new StreamReader(httpResp.GetResponseStream()))
-                                body = r.ReadToEnd();
-                        }
-                        catch { /* swallow */ }
-                    }
+                    int status = http.Status;
+                    string body = http.Body;
 
                     // 404 with "model not found" -> stop, give an actionable error.
                     if (status == 404 || body.IndexOf("not found", StringComparison.OrdinalIgnoreCase) >= 0)
                     {
                         result.Error = "Ollama model '" + model + "' is not pulled. Run:\n"
                             + "    ollama pull " + model + "\n"
-                            + "(or check Web.config / " + modelConfigKey + " for the right name).";
+                            + "(or check the " + modelConfigKey + " setting for the right name).";
                         return result;
                     }
 
@@ -123,16 +103,16 @@ namespace ChessArticle
                         continue;
                     }
 
-                    if (wex.Status == WebExceptionStatus.ConnectFailure
-                        || wex.Status == WebExceptionStatus.NameResolutionFailure)
+                    if (!http.Sent)
                     {
                         result.Error = "Cannot reach Ollama at " + baseUrl +
-                            ". Make sure the Ollama server is running ('ollama serve').";
+                            ". Make sure the Ollama server is running ('ollama serve')."
+                            + " (" + http.TransportError + ")";
                     }
                     else
                     {
-                        result.Error = "Ollama HTTP " + (status > 0 ? status.ToString() : "?")
-                            + " - " + Shorten(body.Length > 0 ? body : wex.Message);
+                        result.Error = "Ollama HTTP " + status
+                            + " - " + Shorten(body.Length > 0 ? body : "(empty response)");
                     }
                     return result;
                 }
